@@ -1,17 +1,50 @@
-__pycache__
-.vscode
+###########################################################
+# 🔒 SECURITY-FIRST .gitignore
+# This project handles personal data, API keys, and AI resumes.
+# Never commit private credentials or generated resume content.
+###########################################################
 
-all excels
-all resumes
-logs
-outputs/logs
-outputs/resumes
+# ▶ Python cache and environment folders
+__pycache__/
+*.py[cod]
+.venv/
+env/
+venv/
+.vscode/
 
-old
+# ▶ OS / IDE junk
+.DS_Store
+Thumbs.db
 
+# ▶ Sensitive configuration files
+.env
+apikeys.py
 secrets.py
 config/personals.py
-.venv
-apikeys.py
-.env
-base_resume.md
+config/base_resume.md     # ⚠️ Contains personal CV data, excluded from commits
+
+# ▶ Generated outputs (runtime artifacts)
+outputs/
+logs/
+*.log
+*.csv
+*.xlsx
+*.json
+
+# ▶ Old or temporary folders
+old/
+tmp/
+backup/
+
+# ▶ Flask, automation, or cache artifacts
+instance/
+*.pid
+*.db
+
+###########################################################
+# ⚠️ SECURITY REMINDERS
+# 1. Never expose .env or any API key in public repos.
+# 2. Keep base_resume.md private — it contains personal info.
+# 3. Regenerate keys immediately if committed by mistake.
+# 4. Use secrets_template.py for safe configuration sharing.
+###########################################################
