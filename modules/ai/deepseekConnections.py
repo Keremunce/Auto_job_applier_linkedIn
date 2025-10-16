@@ -1,14 +1,26 @@
-##> ------ Yang Li : MARKYangL - Feature ------
-from config.secrets import *
+import os
+
+from dotenv import load_dotenv
 from config.settings import showAiErrorAlerts
 from modules.helpers import print_lg, critical_error_log, convert_to_json
 from modules.ai.prompts import *
 
-from pyautogui import confirm
+try:
+    from pyautogui import confirm
+except Exception:  # pragma: no cover
+    confirm = None
 from openai import OpenAI
 from openai.types.model import Model
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from typing import Iterator, Literal
+
+load_dotenv()
+
+use_AI = os.getenv("USE_AI", "false").lower() == "true"
+llm_api_url = os.getenv("OPENAI_API_BASE", "https://api.deepseek.com/v1")
+llm_api_key = os.getenv("OPENAI_API_KEY", "")
+llm_model = os.getenv("OPENAI_MODEL", "deepseek-chat")
+stream_output = os.getenv("OPENAI_STREAM", "false").lower() == "true"
 
 def deepseek_create_client() -> OpenAI | None:
     '''
@@ -18,7 +30,9 @@ def deepseek_create_client() -> OpenAI | None:
     try:
         print_lg("Creating DeepSeek client...")
         if not use_AI:
-            raise ValueError("AI is not enabled! Please enable it by setting `use_AI = True` in `secrets.py` in `config` folder.")
+            raise ValueError("AI is not enabled! Set USE_AI=true in your .env to proceed.")
+        if not llm_api_key:
+            raise ValueError("OPENAI_API_KEY is not configured.")
         
         ##> ------ Tim L : tulxoro - Refactor ------
         base_url = llm_api_url
@@ -33,14 +47,14 @@ def deepseek_create_client() -> OpenAI | None:
         print_lg("---- SUCCESSFULLY CREATED DEEPSEEK CLIENT! ----")
         print_lg(f"Using API URL: {base_url}")
         print_lg(f"Using Model: {llm_model}")
-        print_lg("Check './config/secrets.py' for more details.\n")
+        print_lg("Check your `.env` file for configuration.\n")
         print_lg("---------------------------------------------")
         ##<
         return client
     except Exception as e:
         error_message = f"Error occurred while creating DeepSeek client. Make sure your API connection details are correct."
         critical_error_log(error_message, e)
-        if showAiErrorAlerts:
+        if showAiErrorAlerts and confirm:
             if "Pause AI error alerts" == confirm(f"{error_message}\n{str(e)}", "DeepSeek Connection Error", ["Pause AI error alerts", "Okay Continue"]):
                 showAiErrorAlerts = False
         return None

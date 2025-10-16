@@ -1,0 +1,10 @@
+# Copy this file to `.env` at the project root and customise the values below.
+LINKEDIN_EMAIL="your@email.com"
+LINKEDIN_PASSWORD="your_password"
+OPENAI_API_KEY="sk-your-openai-key"
+OPENAI_API_BASE="https://api.openai.com/v1"
+OPENAI_MODEL="gpt-4o-mini"
+AI_PROVIDER="openai"
+USE_AI="true"
+OPENAI_STREAM="false"
+CHROME_STEALTH_MODE="false"

@@ -13,7 +13,9 @@ version:    24.12.29.12.30
 '''
 
 
-from config.secrets import *
+import os
+
+from dotenv import load_dotenv
 from config.settings import showAiErrorAlerts
 from config.personals import ethnicity, gender, disability_status, veteran_status
 from config.questions import *
@@ -22,12 +24,24 @@ from config.search import security_clearance, did_masters
 from modules.helpers import print_lg, critical_error_log, convert_to_json
 from modules.ai.prompts import *
 
-from pyautogui import confirm
+try:
+    from pyautogui import confirm
+except Exception:  # pragma: no cover - optional in headless mode
+    confirm = None
 from openai import OpenAI
 from openai.types.model import Model
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from typing import Iterator, Literal
 
+load_dotenv()
+
+use_AI = os.getenv("USE_AI", "false").lower() == "true"
+llm_api_url = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+llm_api_key = os.getenv("OPENAI_API_KEY", "")
+llm_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+llm_spec = os.getenv("OPENAI_SPEC", "openai")
+stream_output = os.getenv("OPENAI_STREAM", "false").lower() == "true"
+ai_provider = os.getenv("AI_PROVIDER", "openai")
 
 apiCheckInstructions = """
 
@@ -35,7 +49,7 @@ apiCheckInstructions = """
 2. If you're using an local LLM, please check if the server is running.
 3. Check if appropriate LLM and Embedding models are loaded and running.
 
-Open `secret.py` in `/config` folder to configure your AI API connections.
+Update `.env` to configure your AI API connections.
 
 ERROR:
 """
@@ -46,7 +60,7 @@ def ai_error_alert(message: str, stackTrace: str, title: str = "AI Connection Er
     Function to show an AI error alert and log it.
     """
     global showAiErrorAlerts
-    if showAiErrorAlerts:
+    if showAiErrorAlerts and confirm:
         if "Pause AI error alerts" == confirm(f"{message}{stackTrace}\n", title, ["Pause AI error alerts", "Okay Continue"]):
             showAiErrorAlerts = False
     critical_error_log(message, stackTrace)
@@ -75,7 +89,9 @@ def ai_create_openai_client() -> OpenAI:
     try:
         print_lg("Creating OpenAI client...")
         if not use_AI:
-            raise ValueError("AI is not enabled! Please enable it by setting `use_AI = True` in `secrets.py` in `config` folder.")
+            raise ValueError("AI is not enabled! Set USE_AI=true in your .env to proceed.")
+        if not llm_api_key:
+            raise ValueError("OPENAI_API_KEY is not configured.")
         
         client = OpenAI(base_url=llm_api_url, api_key=llm_api_key)
 
@@ -90,7 +106,7 @@ def ai_create_openai_client() -> OpenAI:
         print_lg("---- SUCCESSFULLY CREATED OPENAI CLIENT! ----")
         print_lg(f"Using API URL: {llm_api_url}")
         print_lg(f"Using Model: {llm_model}")
-        print_lg("Check './config/secrets.py' for more details.\n")
+        print_lg("Check your `.env` file for configuration.\n")
         print_lg("---------------------------------------------")
 
         return client

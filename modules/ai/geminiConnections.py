@@ -1,10 +1,20 @@
+import os
+
 import google.generativeai as genai
-from config.secrets import llm_model, llm_api_key
+from dotenv import load_dotenv
 from config.settings import showAiErrorAlerts
 from modules.helpers import print_lg, critical_error_log, convert_to_json
 from modules.ai.prompts import *
-from pyautogui import confirm
+try:
+    from pyautogui import confirm
+except Exception:  # pragma: no cover
+    confirm = None
 from typing import Literal
+
+load_dotenv()
+
+llm_model = os.getenv("OPENAI_MODEL", "gemini-1.5-flash")
+llm_api_key = os.getenv("OPENAI_API_KEY", "")
 
 def gemini_get_models_list():
     """
@@ -28,8 +38,8 @@ def gemini_create_client():
     """
     try:
         print_lg("Configuring Gemini client...")
-        if not llm_api_key or "YOUR_API_KEY" in llm_api_key:
-            raise ValueError("Gemini API key is not set. Please set it in `config/secrets.py`.")
+        if not llm_api_key or llm_api_key in {"your_password", "not-needed"}:
+            raise ValueError("Gemini API key is not set. Please update `.env`.")
         
         genai.configure(api_key=llm_api_key)
         
@@ -43,14 +53,14 @@ def gemini_create_client():
         
         print_lg("---- SUCCESSFULLY CONFIGURED GEMINI CLIENT! ----")
         print_lg(f"Using Model: {llm_model}")
-        print_lg("Check './config/secrets.py' for more details.\n")
+        print_lg("Check your `.env` file for configuration.\n")
         print_lg("---------------------------------------------")
         
         return model
     except Exception as e:
         error_message = f"Error occurred while configuring Gemini client. Make sure your API key and model name are correct."
         critical_error_log(error_message, e)
-        if showAiErrorAlerts:
+        if showAiErrorAlerts and confirm:
             if "Pause AI error alerts" == confirm(f"{error_message}\n{str(e)}", "Gemini Connection Error", ["Pause AI error alerts", "Okay Continue"]):
                 showAiErrorAlerts = False
         return None

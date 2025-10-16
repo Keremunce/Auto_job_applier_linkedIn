@@ -4,6 +4,8 @@ __pycache__
 all excels
 all resumes
 logs
+outputs/logs
+outputs/resumes
 
 old
 
@@ -11,3 +13,4 @@ secrets.py
 config/personals.py
 .venv
 apikeys.py
+.env
