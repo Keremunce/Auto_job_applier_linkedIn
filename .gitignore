@@ -14,4 +14,4 @@ config/personals.py
 .venv
 apikeys.py
 .env
-/config/base_resume.md
+base_resume.md
