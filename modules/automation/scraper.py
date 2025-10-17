@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -7,11 +8,14 @@ from typing import Literal, Optional
 from selenium.common.exceptions import (
     ElementNotInteractableException,
     NoSuchElementException,
+    TimeoutException,
 )
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from modules.helpers import buffer, print_lg
 from modules.clickers_and_finders import (
@@ -19,19 +23,65 @@ from modules.clickers_and_finders import (
     find_by_class,
     multi_sel_noWait,
     try_find_by_classes,
-    try_linkText,
     try_xp,
     wait_span_click,
     text_input,
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class ScraperContext:
+    """
+    Context helper shared across LinkedIn automation flows.
+
+    Provides a consistent interface for driver interactions, click pacing,
+    and explicit waits.
+    """
+
     driver: WebDriver
-    wait
-    actions
-    click_gap: int
+    click_gap: float = 1.0
+    actions: Optional[ActionChains] = None
+    wait_timeout: int = 10
+    wait: Optional[WebDriverWait] = None
+
+    def __post_init__(self) -> None:
+        if self.driver is None:
+            raise ValueError("ScraperContext requires an initialized WebDriver.")
+
+        if self.wait is None:
+            self.wait = WebDriverWait(self.driver, self.wait_timeout)
+        self.wait_timeout = getattr(self.wait, "_timeout", self.wait_timeout)
+
+        if self.actions is None:
+            self.actions = ActionChains(self.driver)
+
+    def wait_for_element(
+        self,
+        locator: tuple[str, str],
+        timeout: int = 10,
+    ) -> Optional[WebElement]:
+        """
+        Wait for an element to be present and return it when available.
+        """
+        reference_wait = self.wait or WebDriverWait(self.driver, timeout)
+        if timeout != getattr(reference_wait, "_timeout", timeout):
+            reference_wait = WebDriverWait(self.driver, timeout)
+
+        try:
+            return reference_wait.until(EC.presence_of_element_located(locator))
+        except TimeoutException:
+            logger.warning("Timed out waiting for locator %s in %s", locator, self)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed while waiting for locator %s: %s", locator, exc)
+        return None
+
+    def __repr__(self) -> str:
+        session_id = getattr(self.driver, "session_id", "unknown")
+        timeout = self.wait_timeout if self.wait else "unknown"
+        return f"ScraperContext(driver_session={session_id}, click_gap={self.click_gap}, timeout={timeout})"
 
 
 def apply_filters(
