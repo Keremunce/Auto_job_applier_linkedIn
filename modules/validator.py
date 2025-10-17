@@ -112,7 +112,15 @@ def validate_search() -> None | ValueError | TypeError:
     __validation_file_path = "config/search.py"
 
     check_list(search_terms, "search_terms", min_length=1)
-    check_string(search_location, "search_location")
+
+    search_location_value = globals().get("search_location")
+    if search_location_value is not None:
+        check_string(search_location_value, "search_location")
+
+    def _check_optional_list(var_name: str, options: list[str] | None = None, min_length: int = 0) -> None:
+        if var_name in globals():
+            check_list(globals()[var_name], var_name, options or [], min_length)
+
     check_int(switch_number, "switch_number", 1)
     check_boolean(randomize_search_order, "randomize_search_order")
 
@@ -122,17 +130,13 @@ def validate_search() -> None | ValueError | TypeError:
 
     check_boolean(easy_apply_only, "easy_apply_only")
 
-    check_list(experience_level, "experience_level", ["Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"])
-    check_list(job_type, "job_type", ["Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship", "Other"])
-    check_list(on_site, "on_site", ["On-site", "Remote", "Hybrid"])
+    _check_optional_list("experience_level", ["Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"])
+    _check_optional_list("job_type", ["Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship", "Other"])
+    _check_optional_list("on_site", ["On-site", "Remote", "Hybrid"])
 
-    check_list(companies, "companies")
-    check_list(location, "location")
-    check_list(industry, "industry")
-    check_list(job_function, "job_function")
-    check_list(job_titles, "job_titles")
-    check_list(benefits, "benefits")
-    check_list(commitments, "commitments")
+    _check_optional_list("companies")
+    _check_optional_list("industry")
+    _check_optional_list("job_function")
 
     check_boolean(under_10_applicants, "under_10_applicants")
     check_boolean(in_your_network, "in_your_network")
@@ -140,9 +144,9 @@ def validate_search() -> None | ValueError | TypeError:
 
     check_boolean(pause_after_filters, "pause_after_filters")
 
-    check_list(about_company_bad_words, "about_company_bad_words")
-    check_list(about_company_good_words, "about_company_good_words")
-    check_list(bad_words, "bad_words")
+    _check_optional_list("about_company_bad_words")
+    _check_optional_list("about_company_good_words")
+    _check_optional_list("bad_words")
     check_boolean(security_clearance, "security_clearance")
     check_boolean(did_masters, "did_masters")
     check_int(current_experience, "current_experience", -1)

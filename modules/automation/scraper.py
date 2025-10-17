@@ -137,8 +137,8 @@ def apply_filters(
         buffer(recommended_wait)
 
         multi_sel_noWait(driver, search_config.experience_level)
-        multi_sel_noWait(driver, search_config.companies, ctx.actions)
-        if search_config.experience_level or search_config.companies:
+        multi_sel_noWait(driver, getattr(search_config, "companies", []), ctx.actions)
+        if search_config.experience_level or getattr(search_config, "companies", []):
             buffer(recommended_wait)
 
         multi_sel_noWait(driver, search_config.job_type)
@@ -149,14 +149,30 @@ def apply_filters(
         if search_config.easy_apply_only:
             boolean_button_click(driver, ctx.actions, "Easy Apply")
 
-        multi_sel_noWait(driver, search_config.location)
-        multi_sel_noWait(driver, search_config.industry)
-        if search_config.location or search_config.industry:
+        location_filters = getattr(search_config, "location", []) or []
+        if not location_filters:
+            fallback_location = getattr(search_config, "search_location", "").strip()
+            if fallback_location:
+                location_filters = [fallback_location]
+        if location_filters:
+            multi_sel_noWait(driver, location_filters)
+
+        industry_filters = getattr(search_config, "industry", []) or []
+        if industry_filters:
+            multi_sel_noWait(driver, industry_filters)
+
+        if location_filters or industry_filters:
             buffer(recommended_wait)
 
-        multi_sel_noWait(driver, search_config.job_function)
-        multi_sel_noWait(driver, search_config.job_titles)
-        if search_config.job_function or search_config.job_titles:
+        job_functions = getattr(search_config, "job_function", []) or []
+        if job_functions:
+            multi_sel_noWait(driver, job_functions)
+
+        job_titles = getattr(search_config, "job_titles", []) or []
+        if job_titles:
+            multi_sel_noWait(driver, job_titles)
+
+        if job_functions or job_titles:
             buffer(recommended_wait)
 
         if search_config.under_10_applicants:
@@ -169,9 +185,15 @@ def apply_filters(
         wait_span_click(driver, search_config.salary)
         buffer(recommended_wait)
 
-        multi_sel_noWait(driver, search_config.benefits)
-        multi_sel_noWait(driver, search_config.commitments)
-        if search_config.benefits or search_config.commitments:
+        benefits = getattr(search_config, "benefits", []) or []
+        if benefits:
+            multi_sel_noWait(driver, benefits)
+
+        commitments = getattr(search_config, "commitments", []) or []
+        if commitments:
+            multi_sel_noWait(driver, commitments)
+
+        if benefits or commitments:
             buffer(recommended_wait)
 
         show_results_button: WebElement = driver.find_element(
