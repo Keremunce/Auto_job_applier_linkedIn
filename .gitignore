@@ -40,6 +40,31 @@ backup/
 instance/
 *.pid
 *.db
+# ===== PERSONAL CONFIG FILES =====
+config/settings.py
+config/search.py
+config/questions.py
+config/personals.py
+config/secrets.py
+config/secrets_template.py
+config/personals_template.py
+
+# ===== OUTPUTS & LOGS =====
+outputs/logs/
+outputs/resumes/
+outputs/tmp/
+*.csv
+*.xlsx
+
+# ===== ENVIRONMENT =====
+.env
+.vscode/
+.venv/
+__pycache__/
+apikeys.py
+
+# ===== LEGACY / BACKUP =====
+old/
 
 ###########################################################
 # ⚠️ SECURITY REMINDERS
