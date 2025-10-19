@@ -162,8 +162,13 @@ class LinkedInApplier:
         return self.resume_rewriter.rewrite(job_title, company, description)
 
     def launch_and_login(self) -> None:
-        self.browser.launch()
-        self.browser.login(self.credentials.email, self.credentials.password)
+        profile_dir = os.getenv("CHROME_PROFILE_DIR") or None
+        self.browser.safe_launch_and_login(
+            self.credentials.email,
+            self.credentials.password,
+            headless=self.browser.settings.headless,
+            use_profile_dir=profile_dir,
+        )
 
     def run(self) -> None:
         search_terms = list(self.search.search_terms)

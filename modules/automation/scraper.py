@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Literal, Optional
 
 from selenium.common.exceptions import (
+    ElementClickInterceptedException,
     ElementNotInteractableException,
     NoSuchElementException,
     TimeoutException,
@@ -98,15 +100,26 @@ def apply_filters(
         location = search_config.search_location.strip()
         if not location:
             return
+        print_lg(f'Setting search location as: "{location}"')
         try:
-            print_lg(f'Setting search location as: "{location}"')
-            search_location_ele = try_xp(
-                driver,
-                ".//input[@aria-label='City, state, or zip code' and not(@disabled)]",
-                False,
+            location_input = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, "input[aria-label='City, state, or zip code']")
+                )
             )
-            text_input(ctx.actions, search_location_ele, location, "Search Location")
+            location_input.clear()
+            location_input.send_keys(location)
+            time.sleep(1.5)
+            return
+        except TimeoutException:
+            logger.warning("Location input not found; skipping location filter.")
+            return
         except ElementNotInteractableException:
+            logger.warning("Standard location input interaction failed; attempting keyboard fallback.")
+        except Exception as exc:
+            logger.warning("Unexpected error while populating location input: %s", exc)
+
+        try:
             try_xp(
                 driver,
                 ".//label[@class='jobs-search-box__input-icon jobs-search-box__keywords-label']",
@@ -119,7 +132,7 @@ def apply_filters(
             try_xp(driver, ".//button[@aria-label='Cancel']")
         except Exception as exc:
             try_xp(driver, ".//button[@aria-label='Cancel']")
-            print_lg("Failed to update search location, continuing with default!", exc)
+            logger.warning("Failed to update search location via fallback; continuing without location filter. %s", exc)
 
     from selenium.webdriver.common.keys import Keys
 
@@ -258,7 +271,18 @@ def get_job_main_details(
         pass
 
     if not skip:
-        job_details_button.click()
+        try:
+            job_details_button.click()
+        except ElementClickInterceptedException:
+            logger.warning("Normal click failed, retrying with JS click.")
+            ctx.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center'});", job_details_button
+            )
+            ctx.driver.execute_script("arguments[0].click();", job_details_button)
+            time.sleep(1)
+        except Exception as exc:
+            logger.warning("Job card click failed: %s", exc)
+            raise
         buffer(ctx.click_gap)
 
     return job_id, title, company, work_location, work_style, skip

@@ -103,7 +103,7 @@ def validate_questions() -> None | ValueError | TypeError:
     check_boolean(overwrite_previous_answers, "overwrite_previous_answers")
 
 
-from config.search import *
+import config.search as search_config
 def validate_search() -> None | ValueError | TypeError:
     '''
     Validates all variables in the `/config/search.py` file.
@@ -111,44 +111,81 @@ def validate_search() -> None | ValueError | TypeError:
     global __validation_file_path
     __validation_file_path = "config/search.py"
 
+    def _require(attr: str, default, required: bool = False):
+        if hasattr(search_config, attr):
+            return getattr(search_config, attr)
+        if required:
+            raise ValueError(f'Missing required variable "{attr}" in config/search.py')
+        return default
+
+    search_terms = _require("search_terms", [], required=True)
     check_list(search_terms, "search_terms", min_length=1)
 
-    search_location_value = globals().get("search_location")
-    if search_location_value is not None:
-        check_string(search_location_value, "search_location")
+    search_location_value = _require("search_location", "")
+    check_string(search_location_value, "search_location")
 
-    def _check_optional_list(var_name: str, options: list[str] | None = None, min_length: int = 0) -> None:
-        if var_name in globals():
-            check_list(globals()[var_name], var_name, options or [], min_length)
-
+    switch_number = _require("switch_number", None, required=True)
     check_int(switch_number, "switch_number", 1)
+    randomize_search_order = _require("randomize_search_order", False, required=True)
     check_boolean(randomize_search_order, "randomize_search_order")
 
+    sort_by = _require("sort_by", "")
     check_string(sort_by, "sort_by", ["", "Most recent", "Most relevant"])
+    date_posted = _require("date_posted", "")
     check_string(date_posted, "date_posted", ["", "Any time", "Past month", "Past week", "Past 24 hours"])
+    salary = _require("salary", "")
     check_string(salary, "salary")
 
+    easy_apply_only = _require("easy_apply_only", False, required=True)
     check_boolean(easy_apply_only, "easy_apply_only")
 
-    _check_optional_list("experience_level", ["Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"])
-    _check_optional_list("job_type", ["Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship", "Other"])
-    _check_optional_list("on_site", ["On-site", "Remote", "Hybrid"])
+    experience_level = _require("experience_level", [])
+    check_list(experience_level, "experience_level", ["Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"])
+    job_type = _require("job_type", [])
+    check_list(job_type, "job_type", ["Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship", "Other"])
+    on_site = _require("on_site", [])
+    check_list(on_site, "on_site", ["On-site", "Remote", "Hybrid"])
 
-    _check_optional_list("companies")
-    _check_optional_list("industry")
-    _check_optional_list("job_function")
+    companies = _require("companies", [])
+    check_list(companies, "companies")
+    location = _require("location", [])
+    check_list(location, "location")
+    industry = _require("industry", [])
+    check_list(industry, "industry")
+    job_function = _require("job_function", [])
+    check_list(job_function, "job_function")
+    job_titles = _require("job_titles", [])
+    check_list(job_titles, "job_titles")
 
+    benefits = getattr(search_config, "benefits", None)
+    if benefits is not None:
+        check_list(benefits, "benefits")
+    commitments = getattr(search_config, "commitments", None)
+    if commitments is not None:
+        check_list(commitments, "commitments")
+
+    under_10_applicants = _require("under_10_applicants", False, required=True)
     check_boolean(under_10_applicants, "under_10_applicants")
+    in_your_network = _require("in_your_network", False, required=True)
     check_boolean(in_your_network, "in_your_network")
+    fair_chance_employer = _require("fair_chance_employer", False, required=True)
     check_boolean(fair_chance_employer, "fair_chance_employer")
 
+    pause_after_filters = _require("pause_after_filters", False, required=True)
     check_boolean(pause_after_filters, "pause_after_filters")
 
-    _check_optional_list("about_company_bad_words")
-    _check_optional_list("about_company_good_words")
-    _check_optional_list("bad_words")
+    about_company_bad_words = _require("about_company_bad_words", [])
+    check_list(about_company_bad_words, "about_company_bad_words")
+    about_company_good_words = _require("about_company_good_words", [])
+    check_list(about_company_good_words, "about_company_good_words")
+    bad_words = _require("bad_words", [])
+    check_list(bad_words, "bad_words")
+
+    security_clearance = _require("security_clearance", False, required=True)
     check_boolean(security_clearance, "security_clearance")
+    did_masters = _require("did_masters", False, required=True)
     check_boolean(did_masters, "did_masters")
+    current_experience = _require("current_experience", 0, required=True)
     check_int(current_experience, "current_experience", -1)
 
 def validate_environment() -> None | ValueError:

@@ -1,5 +1,7 @@
 import argparse
+import logging
 import os
+import signal
 import sys
 
 from dotenv import load_dotenv
@@ -10,6 +12,28 @@ from modules.ai.resume_rewriter import ResumeRewriter, ResumeRewriterConfig
 from modules.logger import AutomationLogger
 from modules.ui import UIController
 from modules.validator import validate_config
+
+
+stop_requested = False
+_automation_logger: AutomationLogger | None = None
+_browser_controller: BrowserController | None = None
+
+
+def _signal_handler(signum, frame) -> None:  # pragma: no cover - signal handling
+    global stop_requested
+    stop_requested = True
+    logger = _automation_logger.logger if _automation_logger else logging.getLogger("linkedin_automation")
+    logger.info("Signal %s received, requesting shutdown", signal.Signals(signum).name)
+    try:
+        if _browser_controller and _browser_controller.driver:
+            _browser_controller.close()
+    except Exception:
+        pass
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +72,8 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
     logger = AutomationLogger()
+    global _automation_logger
+    _automation_logger = logger
     ui = UIController(headless=args.headless)
 
     validate_config()
@@ -61,6 +87,8 @@ def main() -> None:
         headless=args.headless,
     )
     browser = BrowserController(logger=logger, ui=ui, settings=browser_settings)
+    global _browser_controller
+    _browser_controller = browser
 
     applier = LinkedInApplier(
         browser=browser,
@@ -69,7 +97,10 @@ def main() -> None:
         ui=ui,
         resume_rewriter=resume_rewriter,
     )
-    applier.run()
+    try:
+        applier.run()
+    finally:
+        _browser_controller = None
 
 
 if __name__ == "__main__":

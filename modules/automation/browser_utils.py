@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
-import pickle
+import signal
+import time
+from datetime import datetime
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import undetected_chromedriver as uc
 from selenium.common.exceptions import (
@@ -22,9 +25,103 @@ from modules.helpers import find_default_profile_directory, print_lg
 from modules.logger import AutomationLogger
 from modules.ui import UIController
 
-SESSION_COOKIE_PATH = os.path.join("outputs", "session_cookies.pkl")
+COOKIE_DIR = os.path.join("outputs", "cookies")
+COOKIE_FILE = os.path.join(COOKIE_DIR, "linkedin_cookies.json")
+SHUTDOWN_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+ENABLE_SCREENSHOTS = True
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_cookie_dir() -> None:
+    os.makedirs(COOKIE_DIR, exist_ok=True)
+
+
+def save_cookies(driver: WebDriver, path: str = COOKIE_FILE) -> None:
+    """
+    Persist LinkedIn session cookies in JSON format with only Selenium-safe keys.
+    """
+    if not driver:
+        return
+    _ensure_cookie_dir()
+    allowed_keys: Sequence[str] = (
+        "name",
+        "value",
+        "domain",
+        "path",
+        "expiry",
+        "httpOnly",
+        "secure",
+        "sameSite",
+    )
+    cleaned_cookies: list[dict] = []
+    for cookie in driver.get_cookies():
+        cleaned_cookie = {key: cookie[key] for key in allowed_keys if key in cookie}
+        if cleaned_cookie:
+            cleaned_cookies.append(cleaned_cookie)
+    try:
+        with open(path, "w", encoding="utf-8") as cookie_file:
+            json.dump(cleaned_cookies, cookie_file, ensure_ascii=False, indent=2)
+        logger.info("Saved %s cookies to %s", len(cleaned_cookies), path)
+    except OSError as exc:  # pragma: no cover - disk write issues
+        logger.warning("Failed to write cookies to %s: %s", path, exc)
+
+
+def load_cookies(path: str = COOKIE_FILE) -> list[dict]:
+    """
+    Load cookies from disk, returning an empty list when nothing is stored.
+    """
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as cookie_file:
+            data = json.load(cookie_file)
+        if isinstance(data, list):
+            logger.info("Loaded %s cookies from %s", len(data), path)
+            return data
+        logger.warning("Cookie data in %s is not a list; ignoring contents.", path)
+    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover - defensive guard
+        logger.warning("Failed to load cookies from %s: %s", path, exc)
+    return []
+
+
+def apply_cookies(driver: WebDriver, cookies: Sequence[dict]) -> int:
+    """
+    Apply cookies to the current Selenium driver session.
+    """
+    if not driver or not cookies:
+        return 0
+    applied = 0
+    for cookie in cookies:
+        try:
+            driver.add_cookie(cookie)
+            applied += 1
+        except Exception as exc:  # pragma: no cover - browser quirks
+            logger.warning("Failed to apply cookie %s: %s", cookie.get("name"), exc)
+    logger.info("Applied %s cookies to the browser session.", applied)
+    return applied
+
+
+def save_failed_login_screenshot(driver: Optional[WebDriver], path: Optional[str] = None) -> Optional[str]:
+    """
+    Capture a screenshot on login failure for debugging.
+    """
+    if not driver:
+        return None
+    if not ENABLE_SCREENSHOTS:
+        logger.info("Screenshot skipped (disabled).")
+        return None
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    logs_dir = os.path.join("outputs", "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    screenshot_path = path or os.path.join(logs_dir, f"failed_login_{timestamp}.png")
+    try:
+        driver.save_screenshot(screenshot_path)
+        logger.warning("Saved failed login screenshot to %s", screenshot_path)
+        return screenshot_path
+    except WebDriverException as exc:  # pragma: no cover - driver quirks
+        logger.warning("Failed to capture login screenshot: %s", exc)
+        return None
 
 
 @dataclass
@@ -54,7 +151,11 @@ class BrowserController:
         self.wait: Optional[WebDriverWait] = None
         self.actions: Optional[ActionChains] = None
 
-    def launch(self) -> tuple[WebDriver, WebDriverWait]:
+    def launch(
+        self,
+        headless: Optional[bool] = None,
+        user_data_dir: Optional[str] = None,
+    ) -> tuple[WebDriver, WebDriverWait]:
         options = uc.ChromeOptions()
         options.add_argument("--disable-blink-features=AutomationControlled")
         # Modern undetected_chromedriver compatibility
@@ -65,7 +166,10 @@ class BrowserController:
         options.add_argument("--no-first-run")
         options.add_argument("--no-default-browser-check")
 
-        if self.settings.headless:
+        effective_headless = self.settings.headless if headless is None else headless
+        self.settings.headless = effective_headless
+
+        if effective_headless:
             options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
             options.add_argument("--window-size=1920,1080")
@@ -75,7 +179,12 @@ class BrowserController:
         if self.settings.disable_extensions:
             options.add_argument("--disable-extensions")
 
-        if self.settings.safe_mode:
+        profile_argument = user_data_dir or None
+        if profile_argument:
+            options.add_argument(f"--user-data-dir={profile_argument}")
+            logger.info("Using provided Chrome profile directory: %s", profile_argument)
+            print_lg(f"Using provided Chrome profile directory: {profile_argument}")
+        elif self.settings.safe_mode:
             print_lg("Launching Chrome in guest (safe) mode.")
         else:
             profile_dir = find_default_profile_directory()
@@ -118,6 +227,9 @@ class BrowserController:
                 self.driver.quit()
             except WebDriverException:
                 pass
+        self.driver = None
+        self.wait = None
+        self.actions = None
 
     def is_logged_in(self) -> bool:
         if not self.driver:
@@ -135,15 +247,54 @@ class BrowserController:
     def login(self, email: str, password: str) -> None:
         self.safe_login(email, password)
 
+    def safe_launch_and_login(
+        self,
+        email: str,
+        password: str,
+        headless: bool = True,
+        use_profile_dir: Optional[str] = None,
+    ) -> bool:
+        """
+        Launch the browser, try cookie-based authentication first, and fallback to credentials.
+        """
+        self.launch(headless=headless, user_data_dir=use_profile_dir)
+        assert self.driver is not None  # for type checkers
+
+        self.driver.get("https://www.linkedin.com")
+        cookies = load_cookies()
+        if cookies:
+            apply_cookies(self.driver, cookies)
+            self.driver.refresh()
+            if self._wait_for_feed(timeout=10):
+                logger.info("Authenticated with LinkedIn using saved cookies.")
+                return True
+            logger.info("Stored cookies did not restore LinkedIn session; retrying with credentials.")
+
+        try:
+            self.safe_login(email, password)
+            save_cookies(self.driver)
+            return True
+        except RuntimeError as exc:
+            logger.warning("Credential login failed in headless=%s mode: %s", headless, exc)
+            save_failed_login_screenshot(self.driver)
+            if headless:
+                self.close()
+                self.launch(headless=False, user_data_dir=use_profile_dir)
+                self.ui.headless = False
+                assert self.driver is not None
+                self.driver.get("https://www.linkedin.com")
+                try:
+                    self.safe_login(email, password)
+                    save_cookies(self.driver)
+                    return True
+                except RuntimeError as second_exc:
+                    save_failed_login_screenshot(self.driver)
+                    raise RuntimeError("Unable to authenticate with LinkedIn.") from second_exc
+            raise RuntimeError("Unable to authenticate with LinkedIn.") from exc
+
     def safe_login(self, email: str, password: str) -> None:
         if not self.driver or not self.wait:
             raise RuntimeError("Browser not launched.")
-
-        if self._load_session_from_cookies():
-            if self._wait_for_feed():
-                print_lg("LinkedIn session restored from cookies.")
-                return
-            logger.info("Session cookies were invalid; continuing with credential login.")
 
         max_attempts = 2
         attempt = 0
@@ -175,7 +326,6 @@ class BrowserController:
 
             if self._wait_for_feed():
                 print_lg("LinkedIn login successful.")
-                self._save_session_cookies()
                 return
 
             self.logger.logger.warning(
@@ -183,17 +333,7 @@ class BrowserController:
                 attempt,
                 max_attempts,
             )
-            self._capture_failed_login()
-
-            if attempt == 1 and self.settings.headless:
-                self.logger.logger.warning(
-                    "Headless login failed; retrying once with visible Chrome."
-                )
-                self._restart_driver(headless=False)
-                if self._load_session_from_cookies() and self._wait_for_feed():
-                    print_lg("LinkedIn session restored from cookies.")
-                    return
-                continue
+            save_failed_login_screenshot(self.driver)
 
         if not self.settings.headless and not self.ui.headless:
             prompt_response = self.ui.confirm(
@@ -204,72 +344,20 @@ class BrowserController:
             if prompt_response != "Abort":
                 if self._wait_for_feed():
                     print_lg("LinkedIn login detected after manual intervention.")
-                    self._save_session_cookies()
                     return
             self.logger.logger.warning("Manual login was not completed.")
 
         raise RuntimeError("Unable to authenticate with LinkedIn.")
 
-    def _wait_for_feed(self) -> bool:
-        if not self.driver or not self.wait:
+    def _wait_for_feed(self, timeout: Optional[int] = None) -> bool:
+        if not self.driver:
             return False
         try:
-            self.wait.until(EC.url_contains("https://www.linkedin.com/feed"))
+            if timeout is None and self.wait:
+                wait_obj = self.wait
+            else:
+                wait_obj = WebDriverWait(self.driver, timeout or self.settings.driver_wait_seconds)
+            wait_obj.until(EC.url_contains("https://www.linkedin.com/feed"))
             return True
         except TimeoutException:
             return False
-
-    def _restart_driver(self, headless: bool) -> None:
-        original_headless = self.settings.headless
-        try:
-            self.close()
-        finally:
-            self.settings.headless = headless
-            if not headless and self.ui.headless:
-                self.ui.headless = False
-        driver, wait = self.launch()
-        self.driver = driver
-        self.wait = wait
-        self.actions = ActionChains(driver)
-        if original_headless != headless:
-            logger.info("Browser relaunched with headless=%s for login retry.", headless)
-
-    def _save_session_cookies(self) -> None:
-        if not self.driver:
-            return
-        try:
-            os.makedirs(os.path.dirname(SESSION_COOKIE_PATH), exist_ok=True)
-            with open(SESSION_COOKIE_PATH, "wb") as cookie_file:
-                pickle.dump(self.driver.get_cookies(), cookie_file)
-            logger.info("Session cookies saved to %s", SESSION_COOKIE_PATH)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            self.logger.log_exception("Failed to save session cookies", exc)
-
-    def _load_session_from_cookies(self) -> bool:
-        if not self.driver or not os.path.exists(SESSION_COOKIE_PATH):
-            return False
-        try:
-            with open(SESSION_COOKIE_PATH, "rb") as cookie_file:
-                cookies = pickle.load(cookie_file)
-            self.driver.get("https://www.linkedin.com/")
-            for cookie in cookies:
-                cookie_dict = cookie.copy()
-                cookie_dict.pop("expiry", None)
-                self.driver.add_cookie(cookie_dict)
-            self.driver.get("https://www.linkedin.com/feed")
-            logger.info("Session cookies loaded, attempting feed redirect.")
-            return True
-        except Exception as exc:  # pragma: no cover - defensive logging
-            self.logger.log_exception("Failed to load session cookies", exc)
-            return False
-
-    def _capture_failed_login(self) -> None:
-        if not self.driver:
-            return
-        try:
-            os.makedirs(os.path.join("outputs", "logs"), exist_ok=True)
-            screenshot_path = os.path.join("outputs", "logs", "failed_login.png")
-            self.driver.save_screenshot(screenshot_path)
-            logger.warning("Saved failed login screenshot to %s", screenshot_path)
-        except WebDriverException as exc:
-            self.logger.log_exception("Failed to capture login screenshot", exc)

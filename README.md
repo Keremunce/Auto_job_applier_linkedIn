@@ -107,6 +107,7 @@ linkedin-job-apply-automation/
    python app.py
    ```
    then open http://localhost:5000 in your browser. The table combines successes and failures from `outputs/logs/`.
+7. (Optional) Reuse an existing Chrome profile by setting `CHROME_PROFILE_DIR=/path/to/profile` in your `.env`. The automation will also persist LinkedIn cookies to `outputs/cookies/linkedin_cookies.json` so trusted sessions resume faster.
 
 [back to index](#-content)
 

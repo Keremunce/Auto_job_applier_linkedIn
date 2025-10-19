@@ -25,6 +25,9 @@ config/base_resume.md     # ⚠️ Contains personal CV data, excluded from comm
 
 # ▶ Generated outputs (runtime artifacts)
 outputs/
+outputs/cookies/
+outputs/resumes/
+outputs/logs/
 logs/
 *.log
 *.csv
