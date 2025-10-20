@@ -10,10 +10,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from modules.helpers import sanitize_filename, read_text_file, write_text_file
 from modules.logger import AutomationLogger
 
-try:
-    import pdfkit  # type: ignore
-except Exception:  # pragma: no cover
-    pdfkit = None
+# PATCHED BY CODEX
+pdfkit = None
 
 try:
     from weasyprint import HTML  # type: ignore
@@ -79,23 +77,18 @@ class ResumeRewriter:
         return response.choices[0].message.content or ""
 
     def _convert_markdown_to_pdf(self, markdown_text: str, output_path: str) -> None:
+        # PATCHED BY CODEX
         html_content = markdown2.markdown(markdown_text)
         html_path = output_path.replace(".pdf", ".html")
         write_text_file(html_path, html_content)
 
-        if pdfkit:
-            try:
-                pdfkit.from_string(html_content, output_path)
-                return
-            except Exception as exc:
-                self.logger.logger.warning("pdfkit conversion failed: %s", exc)
-
-        if HTML:
-            HTML(string=html_content).write_pdf(output_path)
-        else:
-            raise RuntimeError(
-                "Neither pdfkit nor WeasyPrint is available to generate PDF output."
+        if not HTML:
+            self.logger.logger.error(
+                "WeasyPrint is required but not installed; cannot generate PDF output."
             )
+            raise RuntimeError("WeasyPrint dependency missing for resume generation.")
+
+        HTML(string=html_content).write_pdf(output_path)
 
     def rewrite(
         self,
@@ -126,6 +119,14 @@ class ResumeRewriter:
         except Exception as exc:
             self.logger.log_exception("Resume rewriting failed", exc)
             return None
+        # PATCHED BY CODEX
+        if "backend" in job_description.lower():
+            backend_line = (
+                "I have foundational knowledge of backend development "
+                "(basic API integrations in PHP) and am eager to grow further in full-stack contexts."
+            )
+            if backend_line not in markdown_resume:
+                markdown_resume = f"{markdown_resume.rstrip()}\n\n{backend_line}"
 
         safe_company = sanitize_filename(company)
         safe_title = sanitize_filename(job_title)

@@ -11,6 +11,7 @@ from selenium.common.exceptions import (
     ElementNotInteractableException,
     NoSuchElementException,
     TimeoutException,
+    StaleElementReferenceException,
 )
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
@@ -101,6 +102,7 @@ def apply_filters(
         if not location:
             return
         print_lg(f'Setting search location as: "{location}"')
+        # PATCHED BY CODEX
         try:
             location_input = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable(
@@ -112,12 +114,35 @@ def apply_filters(
             time.sleep(1.5)
             return
         except TimeoutException:
-            logger.warning("Location input not found; skipping location filter.")
-            return
+            logger.warning(
+                "Default location input selector timed out; attempting localized fallback."
+            )
         except ElementNotInteractableException:
             logger.warning("Standard location input interaction failed; attempting keyboard fallback.")
         except Exception as exc:
             logger.warning("Unexpected error while populating location input: %s", exc)
+
+        # PATCHED BY CODEX
+        try:
+            fallback_input = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(
+                    (
+                        By.XPATH,
+                        "//input[contains(@aria-label, 'Şehir') or contains(@aria-label, 'City')]",
+                    )
+                )
+            )
+            fallback_input.clear()
+            fallback_input.send_keys(location)
+            time.sleep(1.5)
+            return
+        except TimeoutException:
+            logger.warning("Localized fallback for location input timed out; skipping location filter.")
+            return
+        except ElementNotInteractableException:
+            logger.warning("Fallback location input not interactable; attempting keyboard fallback.")
+        except Exception as exc:
+            logger.warning("Unexpected error during fallback location targeting: %s", exc)
 
         try:
             try_xp(
@@ -212,7 +237,18 @@ def apply_filters(
         show_results_button: WebElement = driver.find_element(
             By.XPATH, '//button[contains(@aria-label, "Apply current filters to show")]'
         )
-        show_results_button.click()
+        try:
+            show_results_button.click()
+        except ElementClickInterceptedException:
+            # PATCHED BY CODEX
+            logger.warning("Show results button click intercepted; retrying after scroll.")
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", show_results_button)
+            time.sleep(1)
+            WebDriverWait(driver, 5).until(
+                lambda _driver: show_results_button.is_displayed() and show_results_button.is_enabled()
+            )
+            show_results_button.click()
+            logger.info("Retried show results button click successfully.")
     except Exception as exc:
         print_lg("Setting the preferences failed!", exc)
 
@@ -243,9 +279,16 @@ def get_job_main_details(
     blacklisted_companies: set[str],
     rejected_jobs: set[str],
 ) -> tuple[str, str, str, str, str, bool]:
-    job_details_button = job.find_element(By.TAG_NAME, "a")
-    ctx.actions.move_to_element(job_details_button).perform()
     job_id = job.get_dom_attribute("data-occludable-job-id")
+    # PATCHED BY CODEX
+    try:
+        job_details_button = job.find_element(By.CSS_SELECTOR, "a.job-card-container__link")
+    except NoSuchElementException:
+        logger.warning(
+            "Skipping job %s because job-card link selector is missing.", job_id or "unknown"
+        )
+        return job_id or "", "", "", "", "Unknown", True
+    ctx.actions.move_to_element(job_details_button).perform()
     title = job_details_button.text.partition("\n")[0]
     other_details = job.find_element(By.CLASS_NAME, "artdeco-entity-lockup__subtitle").text
     company, _, work_location = other_details.partition(" · ")
@@ -274,12 +317,17 @@ def get_job_main_details(
         try:
             job_details_button.click()
         except ElementClickInterceptedException:
-            logger.warning("Normal click failed, retrying with JS click.")
+            # PATCHED BY CODEX
+            logger.warning("Job card click intercepted; retrying after scrolling into view.")
             ctx.driver.execute_script(
                 "arguments[0].scrollIntoView({block: 'center'});", job_details_button
             )
-            ctx.driver.execute_script("arguments[0].click();", job_details_button)
             time.sleep(1)
+            WebDriverWait(ctx.driver, 5).until(
+                lambda _driver: job_details_button.is_displayed() and job_details_button.is_enabled()
+            )
+            job_details_button.click()
+            logger.info("Retried job card click successfully.")
         except Exception as exc:
             logger.warning("Job card click failed: %s", exc)
             raise
@@ -305,7 +353,18 @@ def check_blacklist(
     )
     about_company_org = find_by_class(ctx.driver, "jobs-company__box")
     ctx.actions.move_to_element(about_company_org).perform()
-    about_company_text = about_company_org.text.lower()
+    try:
+        about_company_text = about_company_org.text.lower()
+    except StaleElementReferenceException:
+        logger.warning("Company info element went stale — reloading element.")
+        time.sleep(1)
+        try:
+            about_company_org = ctx.driver.find_element(By.CLASS_NAME, "jobs-company__box")
+            ctx.actions.move_to_element(about_company_org).perform()
+            about_company_text = about_company_org.text.lower()
+        except Exception as exc:
+            logger.error("Failed to recover stale element: %s", exc)
+            about_company_text = ""
     skip_checking = False
     for good_word in about_company_good_words:
         if good_word.lower() in about_company_text:

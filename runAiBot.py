@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -44,6 +45,12 @@ def parse_args() -> argparse.Namespace:
         "--headless",
         action="store_true",
         help="Run automation without GUI popups.",
+    )
+    parser.add_argument(
+        "--loop",
+        type=int,
+        default=1,
+        help="Number of times to repeat the search-apply cycle",
     )
     return parser.parse_args()
 
@@ -98,7 +105,15 @@ def main() -> None:
         resume_rewriter=resume_rewriter,
     )
     try:
-        applier.run()
+        for run_index in range(args.loop):
+            if stop_requested:
+                break
+            logger.logger.info("🔁 Run %s/%s starting...", run_index + 1, args.loop)
+            applier.run()
+            logger.logger.info("✅ Run %s/%s completed.", run_index + 1, args.loop)
+            if stop_requested or run_index + 1 >= args.loop:
+                break
+            time.sleep(5)
     finally:
         _browser_controller = None
 

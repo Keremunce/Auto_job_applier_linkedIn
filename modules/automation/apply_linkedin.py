@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+# PATCHED BY CODEX
+import html
 import csv
 import os
+# PATCHED BY CODEX
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from random import choice, shuffle
@@ -13,9 +17,12 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     TimeoutException,
     WebDriverException,
+    StaleElementReferenceException,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+# PATCHED BY CODEX
+from selenium.webdriver.support.ui import WebDriverWait
 
 import config.questions as questions_config
 import config.search as search_config
@@ -39,6 +46,8 @@ from modules.helpers import (
     print_lg,
     truncate_for_csv,
 )
+# PATCHED BY CODEX
+from modules.helpers import sanitize_filename
 from modules.clickers_and_finders import (
     find_by_class,
     try_find_by_classes,
@@ -88,6 +97,25 @@ class LinkedInApplier:
         self.questions = questions_config
         self.search = search_config
         self.personals = personals_config
+        # PATCHED BY CODEX
+        self.blacklisted_words = [
+            word for word in self.search.bad_words if word.lower() != "backend"
+        ]
+        # PATCHED BY CODEX
+        base_terms = [term.lower() for term in getattr(self.search, "search_terms", [])]
+        self._frontend_equivalents: set[str] = set(base_terms)
+        self._frontend_equivalents.update(
+            term.lower()
+            for term in [
+                "Frontend Developer",
+                "Arayüz Uygulama Geliştirme Uzmanı",
+                "UI/UX Frontend Engineer",
+                "UX/UI Design Specialist",
+                "React Developer",
+                "React.js Developer",
+                "Next.js Developer",
+            ]
+        )
 
         self.pause_before_submit = self.questions.pause_before_submit
         self.pause_at_failed_question = self.questions.pause_at_failed_question
@@ -125,6 +153,8 @@ class LinkedInApplier:
                 os.path.join("outputs", "logs"),
                 os.path.join("outputs", "resumes"),
                 self.default_resume_path,
+                # PATCHED BY CODEX
+                os.path.join("outputs", "descriptions"),
             ]
         )
 
@@ -153,6 +183,108 @@ class LinkedInApplier:
             actions=self.browser.actions,
             click_gap=self.click_gap,
         )
+
+    def _click_with_retry(self, driver, element, description: str, wait_timeout: int = 5) -> None:
+        # PATCHED BY CODEX
+        self.logger.logger.info("Attempting to click %s.", description)
+        try:
+            element.click()
+            self.logger.logger.info("Clicked %s successfully.", description)
+            return
+        except ElementClickInterceptedException:
+            self.logger.logger.warning(
+                "Click intercepted on %s; scrolling into view and retrying.", description
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(1)
+            WebDriverWait(driver, wait_timeout).until(
+                lambda _driver: element.is_displayed() and element.is_enabled()
+            )
+        try:
+            element.click()
+            self.logger.logger.info("Retried click on %s successfully.", description)
+        except Exception as final_exc:
+            self.logger.logger.error("Retry click failed on %s: %s", description, final_exc)
+            raise
+
+    def _save_job_description(
+        self,
+        ctx: ScraperContext,
+        job_title: str,
+        job_company: str,
+        description_text: Optional[str],
+        status: str,
+        failure_reason: Optional[str] = None,
+    ) -> None:
+        # PATCHED BY CODEX
+        _ = ctx  # PATCHED BY CODEX: ctx reserved for future use
+        descriptions_dir = os.path.join("outputs", "descriptions")
+        os.makedirs(descriptions_dir, exist_ok=True)
+        safe_company = sanitize_filename(job_company or "UnknownCompany") or "UnknownCompany"
+        safe_title = sanitize_filename(job_title or "UnknownRole") or "UnknownRole"
+        filename = f"{safe_company}_{safe_title}.html"
+        file_path = os.path.join(descriptions_dir, filename)
+
+        status_lower = status.lower()
+        status_class = {
+            "applied": "applied",
+            "failed": "failed",
+            "skipped": "skipped",
+            "viewed": "viewed",
+        }.get(status_lower, "viewed")
+        status_label = status.capitalize()
+        failure_block = ""
+        if failure_reason:
+            failure_block = (
+                '  <div class="failure-reason"><strong>Failure Reason:</strong> '
+                f"{html.escape(failure_reason)}</div>\n"
+            )
+        description_escaped = html.escape(description_text or "No description captured.")
+        viewed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{job_title} — {job_company}</title>
+<style>
+  body {{ font-family: Arial, sans-serif; margin: 2em; background: #f9f9f9; color: #222; }}
+  h1 {{ color: #0a66c2; margin-bottom: 0.25em; }}
+  .meta {{ font-size: 0.9em; color: #555; margin-bottom: 1em; }}
+  .status {{ padding: 8px 12px; display: inline-block; border-radius: 6px; margin-bottom: 1em; }}
+  .status.applied {{ background-color: #d4edda; color: #155724; }}
+  .status.failed {{ background-color: #f8d7da; color: #721c24; }}
+  .status.skipped {{ background-color: #fff3cd; color: #856404; }}
+  .status.viewed {{ background-color: #d1ecf1; color: #0c5460; }}
+  .failure-reason {{ color: #721c24; margin-top: 0.5em; }}
+  hr {{ margin: 1.5em 0; }}
+  pre {{ white-space: pre-wrap; line-height: 1.5; }}
+</style>
+</head>
+<body>
+<h1>{html.escape(job_title or "Unknown Role")}</h1>
+<div class="meta">
+  <strong>Company:</strong> {html.escape(job_company or "Unknown Company")}<br>
+  <strong>Date Viewed:</strong> {viewed_at}<br>
+  <strong>Status:</strong>
+  <span class="status {status_class}">{status_label}</span><br>
+{failure_block if failure_block else ''}
+</div>
+<hr>
+<h2>Job Description / Requirements</h2>
+<pre>{description_escaped}</pre>
+</body>
+</html>
+"""
+
+        with open(file_path, "w", encoding="utf-8") as html_file:
+            html_file.write(html_content)
+        self.logger.logger.info("Saved job description: %s", file_path)
+
+    def _is_relevant_job_title(self, job_title: str) -> bool:
+        # PATCHED BY CODEX
+        normalized_title = job_title.lower()
+        return any(term in normalized_title for term in self._frontend_equivalents)
 
     def _rewrite_resume(self, job_title: str, company: str, description: str) -> Optional[str]:
         if not description or description == "Unknown":
@@ -222,15 +354,27 @@ class LinkedInApplier:
             pagination_element, current_page = get_page_info(ctx)
             buffer(3)
             job_listings = ctx.driver.find_elements(By.XPATH, "//li[@data-occludable-job-id]")
-
-            for job in job_listings:
+            index = 0
+            while index < len(job_listings):
+                job = job_listings[index]
                 if self.settings.keep_screen_awake:
                     self.ui.keep_awake()
                 if current_count >= self.search.switch_number:
                     break
-                result = self._process_single_job(ctx, job)
+                try:
+                    result = self._process_single_job(ctx, job)
+                except StaleElementReferenceException:
+                    self.logger.logger.warning(
+                        "Job card went stale, refreshing job list and continuing..."
+                    )
+                    time.sleep(2)
+                    job_listings = ctx.driver.find_elements(By.XPATH, "//li[@data-occludable-job-id]")
+                    if not job_listings:
+                        break
+                    continue
                 if result:
                     current_count += 1
+                index += 1
 
             if not pagination_element:
                 print_lg("No pagination element found; reached end of results.")
@@ -241,7 +385,8 @@ class LinkedInApplier:
                 next_button = pagination_element.find_element(
                     By.XPATH, f"//button[@aria-label='Page {current_page + 1}']"
                 )
-                next_button.click()
+                # PATCHED BY CODEX
+                self._click_with_retry(ctx.driver, next_button, f"pagination button page {current_page + 1}")
                 print_lg(f"Switching to page {current_page + 1}")
             except NoSuchElementException:
                 print_lg("No more pages in pagination.")
@@ -255,10 +400,18 @@ class LinkedInApplier:
         job_id, title, company, work_location, work_style, skip = get_job_main_details(
             ctx, job, self.blacklisted_companies, self.rejected_jobs
         )
+        job_link = f"https://www.linkedin.com/jobs/view/{job_id}" if job_id else ""  # PATCHED BY CODEX
         if skip or job_id in self.applied_jobs:
             return False
-
-        job_link = f"https://www.linkedin.com/jobs/view/{job_id}"
+        # PATCHED BY CODEX
+        configured_titles = getattr(self.search, "job_titles", []) or []
+        if configured_titles and not self._is_relevant_job_title(title):
+            reason = "Job title outside configured frontend equivalents."
+            self.logger.log_failure(title, company, job_link, reason)
+            self._save_job_description(ctx, title, company, "Unknown", "skipped", reason)
+            self.stats.skipped_count += 1
+            self.rejected_jobs.add(job_id)
+            return False
 
         blacklist_skip, _, bad_word, jobs_top_card = check_blacklist(
             ctx,
@@ -271,6 +424,8 @@ class LinkedInApplier:
             self.logger.log_failure(title, company, job_link, message)
             self.rejected_jobs.add(job_id)
             self.stats.skipped_count += 1
+            # PATCHED BY CODEX
+            self._save_job_description(ctx, title, company, "Unknown", "skipped", message)
             return False
 
         if not jobs_top_card:
@@ -302,7 +457,7 @@ class LinkedInApplier:
 
         description, experience_required, skip_job, skip_reason, skip_message = get_job_description(
             ctx,
-            self.search.bad_words,
+            self.blacklisted_words,  # PATCHED BY CODEX
             self.search.security_clearance,
             self.search.did_masters,
             self.search.current_experience,
@@ -316,6 +471,15 @@ class LinkedInApplier:
             )
             self.rejected_jobs.add(job_id)
             self.stats.skipped_count += 1
+            # PATCHED BY CODEX
+            self._save_job_description(
+                ctx,
+                title,
+                company,
+                description,
+                "skipped",
+                skip_message or skip_reason,
+            )
             return False
 
         resume_path = self._rewrite_resume(title, company, description)
@@ -335,12 +499,23 @@ class LinkedInApplier:
             )
             if applied:
                 self.applied_jobs.add(job_id)
+                # PATCHED BY CODEX
+                self._save_job_description(ctx, title, company, description, "applied")
                 return True
         except Exception as exc:
             self.logger.log_exception("Unhandled error during application", exc)
             self.stats.failed_count += 1
             self.logger.log_failure(
                 title, company, job_link, "Unhandled exception during apply", resume_path
+            )
+            # PATCHED BY CODEX
+            self._save_job_description(
+                ctx,
+                title,
+                company,
+                description,
+                "failed",
+                str(exc),
             )
         return False
 
@@ -408,11 +583,13 @@ class LinkedInApplier:
     ) -> str:
         driver = ctx.driver
         try:
-            ctx.wait.until(
+            # PATCHED BY CODEX
+            apply_button = ctx.wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, ".//button[contains(@class,'jobs-apply-button') and contains(@class, 'artdeco-button--3')]")
                 )
-            ).click()
+            )
+            self._click_with_retry(driver, apply_button, "external apply button")
             wait_span_click(driver, "Continue", 1, True, False)
             windows = driver.window_handles
             driver.switch_to.window(windows[-1])
@@ -441,11 +618,13 @@ class LinkedInApplier:
         driver = ctx.driver
         wait = ctx.wait
         try:
-            wait.until(
+            # PATCHED BY CODEX
+            easy_apply_button = wait.until(
                 EC.element_to_be_clickable(
                     (By.XPATH, ".//button[contains(@class,'jobs-apply-button') and contains(@class, 'artdeco-button--3') and contains(@aria-label, 'Easy')]")
                 )
-            ).click()
+            )
+            self._click_with_retry(driver, easy_apply_button, "easy apply button")
             modal = find_by_class(driver, "jobs-easy-apply-modal")
             wait_span_click(modal, "Next", 1)
             resume_used = resume_path or "Previous resume"
@@ -469,8 +648,9 @@ class LinkedInApplier:
                     modal.find_element(By.XPATH, './/span[normalize-space(.)="Review"]')
                     next_steps = False
                 except NoSuchElementException:
+                    # PATCHED BY CODEX
                     next_button = modal.find_element(By.XPATH, './/button[contains(span, "Next")]')
-                    next_button.click()
+                    self._click_with_retry(driver, next_button, "easy apply modal next button")
                     buffer(self.click_gap)
 
             wait_span_click(driver, "Review", 1, scrollTop=True)
